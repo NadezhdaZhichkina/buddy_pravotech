@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+
+# Test artifacts
+test_buddy.db
+.pytest_cache/
+
+# Env
+.env
+.env.local
