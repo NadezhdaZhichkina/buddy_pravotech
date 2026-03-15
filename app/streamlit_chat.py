@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 import ast
 from pathlib import Path
 
-from sqlalchemy import Text, create_engine, select
-from sqlalchemy.orm import Mapped, Session, declarative_base, mapped_column, sessionmaker
+from sqlalchemy import Column, Integer, Text, create_engine, select
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
 
@@ -12,10 +10,10 @@ Base = declarative_base()
 class KnowledgeItem(Base):
     __tablename__ = "knowledge_items"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    question: Mapped[str] = mapped_column(Text)
-    answer: Mapped[str] = mapped_column(Text)
-    tags: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    tags = Column(Text, nullable=True)
 
 
 def _extract_seed_items() -> list[dict]:
