@@ -12,8 +12,9 @@ st.set_page_config(
 
 # Инициализация при первом запуске
 try:
-    from app.chat_service import get_answer, get_session
-    get_session()  # создаёт БД и заполняет базу при первом запуске
+    from app.streamlit_chat import StreamlitChatService
+
+    service = StreamlitChatService()
 except Exception as e:
     st.error(f"Ошибка инициализации: {e}")
     st.stop()
@@ -42,7 +43,7 @@ if prompt := st.chat_input("Напиши вопрос…"):
     with st.chat_message("assistant"):
         with st.spinner("Думаю…"):
             try:
-                response = get_answer(prompt)
+                response = service.answer(prompt)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
             except Exception as e:
