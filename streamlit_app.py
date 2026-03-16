@@ -76,8 +76,8 @@ except Exception as e:
             openrouter_model=_resolved_model,
         )
         st.warning(
-            "⚠️ Не удалось подключиться к PostgreSQL — используется локальный SQLite. "
-            "Данные не сохранятся между перезапусками. Ошибка: " + str(_init_error)
+            "⚠️ Не удалось подключиться к PostgreSQL — используется локальный SQLite (buddy_streamlit.db). "
+            "Ошибка: " + str(_init_error)
         )
     except Exception as e2:
         import traceback

@@ -252,9 +252,10 @@ def _score(item: KnowledgeItem, query_text: str, terms: list[str]) -> int:
 
 def _get_streamlit_db_url() -> str:
     """БД для Streamlit: STREAMLIT_DATABASE_URL для постоянного хранения на Cloud, иначе локальный SQLite."""
-    # Принудительный fallback — не читаем secrets, сразу SQLite в памяти
+    # Принудительный fallback — не читаем secrets, сразу SQLite в файл (не :memory: — иначе данные теряются при rerun)
     if os.getenv("BUDDY_FORCE_SQLITE") == "1":
-        return "sqlite:///:memory:"
+        db_path = Path(__file__).resolve().parent.parent / "buddy_streamlit.db"
+        return f"sqlite:///{db_path}"
     url = (
         os.getenv("STREAMLIT_DATABASE_URL")
         or os.getenv("DATABASE_URL")
