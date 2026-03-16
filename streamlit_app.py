@@ -811,7 +811,7 @@ if not is_moderator:
 moderator_tickets = service.list_moderation_tickets(include_closed=False) if is_moderator else []
 
 if is_moderator:
-    with st.expander("🧾 Тикеты модератора", expanded=True):
+    with st.expander("🧾 Тикеты модератора", expanded=bool(moderator_tickets)):
         if st.session_state.moderator_notice:
             st.success(st.session_state.moderator_notice)
             st.session_state.moderator_notice = ""
@@ -820,11 +820,6 @@ if is_moderator:
             "Приветствую в панели модератора. "
             "Здесь можно пополнить базу знаний и отработать вопросы от пользователей."
         )
-
-        col_refresh, _ = st.columns([1, 4])
-        with col_refresh:
-            if st.button("🔄 Обновить список тикетов", key="mod_refresh_tickets"):
-                st.rerun()
 
         tickets = moderator_tickets
         if not tickets:
@@ -1047,7 +1042,7 @@ if show_user_panel:
                     user_circle=profile.get("circle"),
                 )
                 st.session_state.user_notices_by_user[current_user] = (
-                    f"Вопрос отправлен модератору. Тикет: #{ticket_id}. Ответ придёт в этот чат."
+                    f"Вопрос отправлен модератору. Тикет: #{ticket_id}. Ответ придет в этот чат."
                 )
                 st.rerun()
 
@@ -1124,30 +1119,12 @@ if (not is_moderator) and (prompt := st.chat_input("Напиши сообщен�
                         {"role": m["role"], "content": m["content"]}
                         for m in st.session_state.messages[-10:]
                     ]
-                    # Вопросы про компанию — answer_with_meta (строго из БЗ, без выдумок). Болтовня — generate_reply.
-                    is_small_talk = _looks_like_small_talk(prompt)
-                    if not is_small_talk:
-                        result = service.answer_with_meta(
-                            prompt,
-                            user_role=profile.get("role"),
-                            user_circle=profile.get("circle"),
-                        )
-                        if result.get("needs_moderation") or _should_send_to_moderator(prompt, result):
-                            response = _prepare_ticket_offer(
-                                prompt,
-                                profile.get("role"),
-                                profile.get("circle"),
-                                st.session_state.chat_username,
-                            )
-                        else:
-                            response = result.get("answer", "") or ""
-                    else:
-                        response = service.generate_reply(
-                            prompt,
-                            history=history,
-                            profile=profile,
-                            next_task=next_task,
-                        )
+                    response = service.generate_reply(
+                        prompt,
+                        history=history,
+                        profile=profile,
+                        next_task=next_task,
+                    )
                     # Заменять на тикет, если GPT явно предлагает передать модератору — всегда.
                     # Иначе — только когда нет релевантного ответа в базе (GPT мог добавить «уточнить» как оговорку).
                     has_kb_answer = service.has_strong_kb_match(prompt, history=history)
