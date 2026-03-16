@@ -438,7 +438,8 @@ def _extract_question_from_history_for_ticket(messages: list, current_prompt: st
             continue
         if len(content) > 3 and (_looks_like_question(content) or _looks_like_term_or_abbreviation_query(content)):
             return content
-        if len(content) > 5 and fallback is None:
+        # Fallback только для содержательных сообщений, не приветствий
+        if len(content) > 5 and fallback is None and not _looks_like_small_talk(content):
             fallback = content
     # Если не нашли в пользовательских сообщениях — пробуем из ответа ассистента («вопрос про X»)
     if last_assistant_content:
@@ -1257,7 +1258,12 @@ if (not is_moderator) and (prompt := st.chat_input("Напиши сообщен�
                     if explicit_escalation and history:
                         for m in reversed(history):
                             prev = (m.get("content") or "").strip()
-                            if m.get("role") == "user" and len(prev) > 3 and prev != prompt:
+                            if (
+                                m.get("role") == "user"
+                                and len(prev) > 3
+                                and prev != prompt
+                                and not _looks_like_small_talk(prev)
+                            ):
                                 if _looks_like_question(prev) or _looks_like_term_or_abbreviation_query(prev):
                                     ticket_question = prev
                                     break
