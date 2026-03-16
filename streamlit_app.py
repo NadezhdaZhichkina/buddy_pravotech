@@ -66,9 +66,10 @@ try:
     )
 except Exception as e:
     _init_error = e
-    # Fallback: временно отключаем PostgreSQL, пробуем SQLite
+    # Fallback: принудительно SQLite — st.secrets не очищается при pop env, потому флаг
     _old_db = os.environ.pop("STREAMLIT_DATABASE_URL", None)
     _old_db2 = os.environ.pop("DATABASE_URL", None)
+    os.environ["BUDDY_FORCE_SQLITE"] = "1"
     try:
         _service = StreamlitChatService(
             openrouter_api_key=_resolved_key,
@@ -85,6 +86,7 @@ except Exception as e:
         st.code(traceback.format_exc(), language=None)
         st.stop()
     finally:
+        os.environ.pop("BUDDY_FORCE_SQLITE", None)
         if _old_db is not None:
             os.environ["STREAMLIT_DATABASE_URL"] = _old_db
         if _old_db2 is not None:

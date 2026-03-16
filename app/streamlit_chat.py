@@ -10,6 +10,7 @@ from urllib import request as urlrequest
 from sqlalchemy import Column, DateTime, Integer, Text, create_engine, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 Base = declarative_base()
 
@@ -251,6 +252,9 @@ def _score(item: KnowledgeItem, query_text: str, terms: list[str]) -> int:
 
 def _get_streamlit_db_url() -> str:
     """БД для Streamlit: STREAMLIT_DATABASE_URL для постоянного хранения на Cloud, иначе локальный SQLite."""
+    # Принудительный fallback — не читаем secrets, сразу SQLite в памяти
+    if os.getenv("BUDDY_FORCE_SQLITE") == "1":
+        return "sqlite:///:memory:"
     url = (
         os.getenv("STREAMLIT_DATABASE_URL")
         or os.getenv("DATABASE_URL")
@@ -368,6 +372,8 @@ class StreamlitChatService:
         engine_kw: dict = {"future": True}
         if db_url.startswith("sqlite"):
             engine_kw["connect_args"] = {"check_same_thread": False}
+            if ":memory:" in db_url:
+                engine_kw["poolclass"] = StaticPool
         else:
             engine_kw["pool_pre_ping"] = True
         self.engine = create_engine(db_url, **engine_kw)
