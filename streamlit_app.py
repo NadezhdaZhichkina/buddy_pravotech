@@ -678,6 +678,56 @@ def _next_step_response(profile: dict, next_task: dict | None) -> str:
     )
 
 
+# Инициализация session state до панели ролей
+if "chat_username" not in st.session_state:
+    st.session_state.chat_username = "user1"
+if "moderator_username" not in st.session_state:
+    st.session_state.moderator_username = "nadezhda_zhichkina"
+if "role_mode" not in st.session_state:
+    st.session_state.role_mode = "Пользователь"
+
+# Панель переключения ролей — всегда видна вверху (как на локальном компе)
+st.subheader("Режим тестирования")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.session_state.role_mode = st.radio(
+        "Роль",
+        options=["Пользователь", "Модератор"],
+        index=0 if st.session_state.role_mode == "Пользователь" else 1,
+        horizontal=True,
+        key="role_switch",
+    )
+with col2:
+    cu = st.session_state.chat_username
+    current_user_index = list(DEMO_USERS).index(cu) if cu in DEMO_USERS else 0
+    selected_user = st.selectbox(
+        "Пользователь",
+        options=list(DEMO_USERS),
+        index=current_user_index,
+        help="Под каким пользователем открыт чат.",
+        key="user_switch",
+    )
+    st.session_state.chat_username = selected_user.strip().lower() or "user1"
+with col3:
+    moderator_username = st.text_input(
+        "Username модератора",
+        value=st.session_state.moderator_username,
+        help="Этому модератору приходят тикеты.",
+        key="mod_switch",
+    ).strip().lower()
+    st.session_state.moderator_username = moderator_username or "nadezhda_zhichkina"
+
+is_moderator = st.session_state.role_mode == "Модератор"
+try:
+    pending_total = len(service.list_moderation_tickets(include_closed=False))
+except Exception:
+    pending_total = 0
+st.caption(
+    f"Чат: `{st.session_state.chat_username}` · Модератор: `{st.session_state.moderator_username}`"
+    + (f" · Тикетов в очереди: {pending_total}" if is_moderator else "")
+)
+st.divider()
+
 st.title("🤖 Buddy")
 st.caption(
     "Твой buddy на онбординге: помогу с адаптацией, вопросами по процессам и первыми шагами в компании. "
@@ -687,43 +737,6 @@ if service.llm_enabled:
     st.success(f"LLM: включен (OpenRouter, model: {resolved_model})")
 else:
     st.info("LLM: выключен — ответы только по базе знаний. Добавь OPENROUTER_API_KEY в Secrets Streamlit Cloud.")
-
-with st.expander("Режим тестирования", expanded=True):
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.session_state.role_mode = st.radio(
-            "Роль",
-            options=["Пользователь", "Модератор"],
-            index=0 if st.session_state.get("role_mode", "Пользователь") == "Пользователь" else 1,
-            horizontal=True,
-        )
-    with col2:
-        current_user_index = 0
-        cu = st.session_state.get("chat_username", "user1")
-        if cu in DEMO_USERS:
-            current_user_index = list(DEMO_USERS).index(cu)
-        selected_user = st.selectbox(
-            "Пользователь",
-            options=list(DEMO_USERS),
-            index=current_user_index,
-            help="Под каким пользователем открыт чат.",
-        )
-        st.session_state.chat_username = selected_user.strip().lower() or "user1"
-    with col3:
-        moderator_username = st.text_input(
-            "Username модератора",
-            value=st.session_state.get("moderator_username", "nadezhda_zhichkina"),
-            help="Этому модератору приходят тикеты.",
-        ).strip().lower()
-        st.session_state.moderator_username = moderator_username or "nadezhda_zhichkina"
-    is_moderator = st.session_state.role_mode == "Модератор"
-    is_moderator = st.session_state.role_mode == "Модератор"
-    st.caption(
-        f"Чат: `{st.session_state.chat_username}` | Модератор: `{st.session_state.moderator_username}`"
-        + (f" | Тикетов: {len(service.list_moderation_tickets(include_closed=False))}" if is_moderator else "")
-    )
-
-is_moderator = st.session_state.get("role_mode", "Пользователь") == "Модератор"
 
 with st.expander("Диагностика LLM", expanded=False):
     st.write(
