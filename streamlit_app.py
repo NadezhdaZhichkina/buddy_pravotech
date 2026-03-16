@@ -343,6 +343,9 @@ def _contains_uncertainty_language(text: str) -> bool:
         "лучше уточнить",
         "стоит уточнить",
         "спросить у коллег",
+        "передать модератору",
+        "направлю тикет",
+        "направить тикет",
     )
     if any(m in t for m in markers):
         return True
@@ -678,40 +681,38 @@ def _next_step_response(profile: dict, next_task: dict | None) -> str:
     )
 
 
-# ========== ПАНЕЛЬ РОЛЕЙ — ПЕРВОЕ, ЧТО ВИДИТ ПОЛЬЗОВАТЕЛЬ ==========
-# Инициализация session state до панели ролей
+# ========== ПАНЕЛЬ РОЛЕЙ — Пользователь 1, Пользователь 2 или Модератор ==========
+ROLE_OPTIONS = ["Пользователь 1", "Пользователь 2", "Модератор"]
+if "current_role" not in st.session_state:
+    st.session_state.current_role = "Пользователь 1"
 if "chat_username" not in st.session_state:
     st.session_state.chat_username = "user1"
 if "moderator_username" not in st.session_state:
     st.session_state.moderator_username = "nadezhda_zhichkina"
-if "role_mode" not in st.session_state:
-    st.session_state.role_mode = "Пользователь"
 
-# Панель переключения ролей — всегда вверху (Streamlit-чат, как на локальном компе)
+# Единый селектор: роль пользователя или модератора
 st.markdown("---")
-st.markdown("### 🔀 Режим тестирования — переключение ролей")
-st.subheader("Режим тестирования")
-col1, col2, col3 = st.columns(3)
+st.markdown("### 🔀 Роль")
+col1, col2 = st.columns([2, 1])
 with col1:
-    st.session_state.role_mode = st.radio(
-        "Роль",
-        options=["Пользователь", "Модератор"],
-        index=0 if st.session_state.role_mode == "Пользователь" else 1,
+    role_idx = ROLE_OPTIONS.index(st.session_state.current_role) if st.session_state.current_role in ROLE_OPTIONS else 0
+    selected_role = st.radio(
+        "Выбери роль",
+        options=ROLE_OPTIONS,
+        index=role_idx,
         horizontal=True,
         key="role_switch",
     )
+    st.session_state.current_role = selected_role
+    if selected_role == "Пользователь 1":
+        st.session_state.chat_username = "user1"
+        is_moderator = False
+    elif selected_role == "Пользователь 2":
+        st.session_state.chat_username = "user2"
+        is_moderator = False
+    else:
+        is_moderator = True  # Модератор
 with col2:
-    cu = st.session_state.chat_username
-    current_user_index = list(DEMO_USERS).index(cu) if cu in DEMO_USERS else 0
-    selected_user = st.selectbox(
-        "Пользователь",
-        options=list(DEMO_USERS),
-        index=current_user_index,
-        help="Под каким пользователем открыт чат.",
-        key="user_switch",
-    )
-    st.session_state.chat_username = selected_user.strip().lower() or "user1"
-with col3:
     moderator_username = st.text_input(
         "Username модератора",
         value=st.session_state.moderator_username,
@@ -719,8 +720,6 @@ with col3:
         key="mod_switch",
     ).strip().lower()
     st.session_state.moderator_username = moderator_username or "nadezhda_zhichkina"
-
-is_moderator = st.session_state.role_mode == "Модератор"
 try:
     pending_total = len(service.list_moderation_tickets(include_closed=False))
 except Exception:
@@ -751,14 +750,8 @@ with st.expander("Диагностика LLM", expanded=False):
         }
     )
 
-if "chat_username" not in st.session_state:
-    st.session_state.chat_username = "user1"
-if "moderator_username" not in st.session_state:
-    st.session_state.moderator_username = "nadezhda_zhichkina"
-if "role_mode" not in st.session_state:
-    st.session_state.role_mode = "Пользователь"
-
-is_moderator = st.session_state.role_mode == "Модератор"
+# is_moderator определяется в блоке ролей выше
+is_moderator = st.session_state.current_role == "Модератор"
 if "messages_by_user" not in st.session_state:
     st.session_state.messages_by_user = {}
 if "profiles_by_user" not in st.session_state:
@@ -981,9 +974,11 @@ if is_moderator:
             except Exception as e:
                 st.error(f"Не удалось сохранить запись: {e}")
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# Модератор видит только тикеты, не чат пользователей
+if not is_moderator:
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
 show_user_panel = not is_moderator
 if show_user_panel:
