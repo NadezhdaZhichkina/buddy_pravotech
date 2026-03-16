@@ -426,7 +426,9 @@ class StreamlitChatService:
             if not row:
                 return None
             ticket_id_val = int(row.id)
-            question_text = row.question
+            question_text = (row.question or "").strip()
+            if not question_text:
+                return None
 
             row.draft_answer = None
             row.final_answer = final_answer
@@ -434,21 +436,20 @@ class StreamlitChatService:
             row.moderator_username = moderator
             row.delivered_to_user = 0
 
-            final_tags = (tags or "").strip() or _auto_tags_from_qa(row.question, final_answer, limit=10)
+            final_tags = (tags or "").strip() or _auto_tags_from_qa(question_text, final_answer, limit=10)
             existing = (
-                db.query(KnowledgeItem).filter(KnowledgeItem.question == row.question).first()
-                or _find_existing_item_by_normalized_question(db, row.question)
+                db.query(KnowledgeItem).filter(KnowledgeItem.question == question_text).first()
+                or _find_existing_item_by_normalized_question(db, question_text)
             )
             if existing:
-                existing.question = row.question
+                existing.question = question_text
                 existing.answer = final_answer
-                if final_tags:
-                    existing.tags = final_tags
+                existing.tags = final_tags or existing.tags
                 action = "updated"
                 knowledge_id = int(existing.id)
             else:
                 kb_row = KnowledgeItem(
-                    question=row.question,
+                    question=question_text,
                     answer=final_answer,
                     tags=final_tags or "moderator_validated",
                 )
@@ -459,7 +460,7 @@ class StreamlitChatService:
 
             db.commit()
 
-        # Гарантия обучения: проверяем в новой сессии, что пара вопрос-ответ реально в БЗ.
+        # Гарантия: в новой сессии проверяем, что запись реально в БЗ (и добавляем, если по какой-то причине не дошла).
         with self.SessionLocal() as db2:
             verified_row = (
                 db2.query(KnowledgeItem).filter(KnowledgeItem.question == question_text).first()

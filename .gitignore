@@ -11,3 +11,6 @@ test_buddy.db
 # Env
 .env
 .env.local
+
+# Release copies (локальные копии v1.0 и buddy-2.0)
+releases/

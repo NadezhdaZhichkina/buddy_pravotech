@@ -938,6 +938,7 @@ if is_moderator:
                         options=["в работе", "отправить", "отклонен"],
                         index=0 if status_default == "в работе" else 1,
                         key=f"ticket_status_edit_{selected_ticket['id']}",
+                        help="«Отправить» — отправит ответ пользователю и сохранит в общую базу знаний",
                     )
                     ticket_tags = st.text_input(
                         "Теги (опционально)",
