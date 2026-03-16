@@ -37,20 +37,34 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, futu
 
 Base.metadata.create_all(bind=engine)
 
-# Миграция: добавить mattermost_channel_id в questions (для существующих БД)
-def _migrate_add_channel_id(eng):
+# Миграция: добавить новые поля в questions (для существующих БД)
+def _migrate_questions_table(eng):
     from sqlalchemy import inspect, text
     try:
         insp = inspect(eng)
         cols = [c["name"] for c in insp.get_columns("questions")]
+        alter_statements = []
         if "mattermost_channel_id" not in cols:
+            alter_statements.append(
+                "ALTER TABLE questions ADD COLUMN mattermost_channel_id VARCHAR(64)"
+            )
+        if "pending_answer_text" not in cols:
+            alter_statements.append(
+                "ALTER TABLE questions ADD COLUMN pending_answer_text TEXT"
+            )
+        if "pending_answer_author_id" not in cols:
+            alter_statements.append(
+                "ALTER TABLE questions ADD COLUMN pending_answer_author_id VARCHAR(64)"
+            )
+        if alter_statements:
             with eng.connect() as conn:
-                conn.execute(text("ALTER TABLE questions ADD COLUMN mattermost_channel_id VARCHAR(64)"))
+                for stmt in alter_statements:
+                    conn.execute(text(stmt))
                 conn.commit()
     except Exception:
         pass
 
-_migrate_add_channel_id(engine)
+_migrate_questions_table(engine)
 
 app = FastAPI(title=settings.app_name)
 
@@ -334,6 +348,22 @@ def get_or_create_user(db: Session, mattermost_user_id: str, username: Optional[
     return user
 
 
+def _is_yes_confirmation(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    yes_variants = {"да", "yes", "ok", "ок", "ага", "подтверждаю"}
+    if normalized in yes_variants:
+        return True
+    return normalized.startswith("да ") or "отправляй" in normalized
+
+
+def _is_no_confirmation(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    no_variants = {"нет", "no", "не", "неа", "отмена", "стоп"}
+    if normalized in no_variants:
+        return True
+    return normalized.startswith("нет ") or "не отправляй" in normalized
+
+
 async def handle_new_message(payload: Dict[str, Any], db: Session) -> str:
     """
     Handle incoming Mattermost webhook event.
@@ -361,9 +391,9 @@ async def handle_new_message(payload: Dict[str, Any], db: Session) -> str:
     if user_id == payload.get("bot_user_id"):
         return "ok"
 
-    # If this is a reply in a thread started by Buddy in expert channel,
-    # treat as human answer to a pending question.
-    if root_id and channel_id == settings.mattermost_expert_channel_id:
+    # If this is a reply in a thread started by Buddy in moderator channel,
+    # process moderator answer/approval workflow.
+    if root_id and channel_id == settings.mattermost_moderator_channel_id:
         await handle_human_answer(db=db, root_post_id=root_id, text=text, author_user_id=user_id)
         return "ok"
 
@@ -479,10 +509,10 @@ async def handle_question(db: Session, user: User, text: str, channel_id: str) -
         db.commit()
         return answer
 
-    # Ask experts in a separate channel.
-    if not settings.mattermost_expert_channel_id:
+    # Ask moderators in a separate channel.
+    if not settings.mattermost_moderator_channel_id:
         fallback = (
-            "Такого в базе знаний пока нет, а канал для вопросов коллегам не настроен. "
+            "Такого в базе знаний пока нет, а чат модератора не настроен. "
             "Лучше уточни у тимлида или наставника — они подскажут."
         )
         return fallback
@@ -490,10 +520,10 @@ async def handle_question(db: Session, user: User, text: str, channel_id: str) -
     expert_text = (
         f"Коллеги, вопрос от новичка @{user.username or user.mattermost_user_id}:\n"
         f"> {text}\n\n"
-        "Ответьте в этом треде — я сохраню в базу знаний и передам ему."
+        "Ответьте в этом треде. После вашего ответа я отдельно спрошу подтверждение перед отправкой пользователю."
     )
     root_post_id = await post_message(
-        channel_id=settings.mattermost_expert_channel_id,
+        channel_id=settings.mattermost_moderator_channel_id,
         text=expert_text,
         root_id=None,
     )
@@ -513,30 +543,84 @@ async def handle_human_answer(db: Session, root_post_id: str, text: str, author_
     if not question:
         return
 
-    question.status = QuestionStatusEnum.ANSWERED
-    db.add(
-        Answer(
-            question_id=question.id,
-            author_type="human",
-            author_mattermost_user_id=author_user_id,
-            text=text,
+    # 1) Если черновика ответа ещё нет — сохраняем его и просим подтверждение.
+    if not question.pending_answer_text:
+        question.pending_answer_text = text
+        question.pending_answer_author_id = author_user_id
+        db.commit()
+        await post_message(
+            channel_id=settings.mattermost_moderator_channel_id,
+            root_id=root_post_id,
+            text=(
+                "Принял ответ:\n"
+                f"> {text}\n\n"
+                "Могу отправить этот ответ пользователю и сохранить в базу знаний?\n"
+                "Ответьте в этом треде: `да` или `нет`."
+            ),
         )
-    )
-    # Save to knowledge base
-    db.add(
-        KnowledgeItem(
-            question=question.text,
-            answer=text,
-            tags=None,
-            source_question_id=question.id,
-        )
-    )
-    db.commit()
+        return
 
-    # Отправить ответ новичку в его DM
-    if question.mattermost_channel_id and settings.mattermost_bot_token:
-        reply = f"Коллеги ответили на твой вопрос:\n\n> {question.text}\n\n{text}"
-        await post_message(channel_id=question.mattermost_channel_id, text=reply)
+    # 2) Есть черновик — ждём подтверждение отправки.
+    if _is_yes_confirmation(text):
+        final_answer = question.pending_answer_text
+        final_author_id = question.pending_answer_author_id
+
+        question.status = QuestionStatusEnum.ANSWERED
+        question.pending_answer_text = None
+        question.pending_answer_author_id = None
+        db.add(
+            Answer(
+                question_id=question.id,
+                author_type="human",
+                author_mattermost_user_id=final_author_id,
+                text=final_answer,
+            )
+        )
+        db.add(
+            KnowledgeItem(
+                question=question.text,
+                answer=final_answer,
+                tags="moderator_validated",
+                source_question_id=question.id,
+            )
+        )
+        db.commit()
+
+        if question.mattermost_channel_id:
+            reply = f"Коллеги ответили на твой вопрос:\n\n> {question.text}\n\n{final_answer}"
+            await post_message(channel_id=question.mattermost_channel_id, text=reply)
+
+        await post_message(
+            channel_id=settings.mattermost_moderator_channel_id,
+            root_id=root_post_id,
+            text="Готово: отправил ответ пользователю и сохранил вопрос/ответ в базу знаний.",
+        )
+        return
+
+    if _is_no_confirmation(text):
+        question.pending_answer_text = None
+        question.pending_answer_author_id = None
+        db.commit()
+        await post_message(
+            channel_id=settings.mattermost_moderator_channel_id,
+            root_id=root_post_id,
+            text="Ок, не отправляю. Напишите новый вариант ответа в этом треде.",
+        )
+        return
+
+    # 3) Если пришёл новый текст вместо "да/нет", считаем это обновлённым черновиком.
+    question.pending_answer_text = text
+    question.pending_answer_author_id = author_user_id
+    db.commit()
+    await post_message(
+        channel_id=settings.mattermost_moderator_channel_id,
+        root_id=root_post_id,
+        text=(
+            "Обновил черновик ответа.\n"
+            "Можно отправить пользователю и сохранить в базу знаний?\n"
+            "Ответьте: `да` или `нет`."
+        ),
+    )
 
 
 @app.post("/mattermost/webhook", response_class=PlainTextResponse)

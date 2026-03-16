@@ -97,6 +97,7 @@ ROLE_ALIASES: Dict[str, str] = {
     "дизайнер": "designer",
     "дизайн": "designer",
     "менеджер": "manager",
+    "менеджер по документам": "manager",
     "менедже": "manager",  # опечатка
     "продажи": "sales",
     "sales": "sales",

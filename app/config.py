@@ -14,6 +14,11 @@ class Settings(BaseModel):
     mattermost_base_url: str = os.getenv("MATTERMOST_BASE_URL", "http://localhost:8065")
     mattermost_bot_token: str = os.getenv("MATTERMOST_BOT_TOKEN", "")
     mattermost_expert_channel_id: str = os.getenv("MATTERMOST_EXPERT_CHANNEL_ID", "")
+    # Новый ключ, но с обратной совместимостью со старым expert-channel.
+    mattermost_moderator_channel_id: str = os.getenv(
+        "MATTERMOST_MODERATOR_CHANNEL_ID",
+        os.getenv("MATTERMOST_EXPERT_CHANNEL_ID", ""),
+    )
 
     # Database
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./buddy.db")

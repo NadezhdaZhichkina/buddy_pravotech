@@ -53,6 +53,8 @@ class Question(Base):
     )
     mattermost_root_post_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     mattermost_channel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # DM канал новичка
+    pending_answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)  # Черновик ответа модератора
+    pending_answer_author_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="questions")
