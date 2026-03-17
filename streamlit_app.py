@@ -932,8 +932,6 @@ if "messages_by_user" not in st.session_state:
     st.session_state.messages_by_user = {}
 if "profiles_by_user" not in st.session_state:
     st.session_state.profiles_by_user = {}
-if "user_notices_by_user" not in st.session_state:
-    st.session_state.user_notices_by_user = {}
 if "pending_ticket_offer_by_user" not in st.session_state:
     st.session_state.pending_ticket_offer_by_user = {}
 if st.session_state.chat_username not in st.session_state.messages_by_user:
@@ -1192,34 +1190,6 @@ if show_user_panel:
                         "role": "assistant",
                         "content": "Ок, не отправляю вопрос на модерацию. Если понадобится, можно отправить его позже.",
                     }
-                )
-                st.rerun()
-
-    with st.expander("Нужна помощь человека? Отправь вопрос модератору", expanded=True):
-        current_notice = st.session_state.user_notices_by_user.get(current_user, "")
-        if current_notice:
-            st.success(current_notice)
-            st.session_state.user_notices_by_user[current_user] = ""
-        with st.form("user_manual_ticket_form", clear_on_submit=True):
-            user_ticket_question = st.text_area(
-                "Вопрос для модератора",
-                placeholder="Напиши вопрос, который нужно передать человеку...",
-            )
-            send_user_ticket = st.form_submit_button("Отправить вопрос человеку")
-        if send_user_ticket:
-            q = (user_ticket_question or "").strip()
-            if not q:
-                st.warning("Напиши вопрос перед отправкой.")
-            else:
-                profile = st.session_state.profile
-                ticket_id = service.create_moderation_ticket(
-                    question=q,
-                    requester_username=st.session_state.chat_username,
-                    user_role=profile.get("role"),
-                    user_circle=profile.get("circle"),
-                )
-                st.session_state.user_notices_by_user[current_user] = (
-                    f"Вопрос отправлен модератору. Тикет: #{ticket_id}. Ответ придет в этот чат."
                 )
                 st.rerun()
 
