@@ -251,10 +251,20 @@ def _score(item: KnowledgeItem, query_text: str, terms: list[str]) -> int:
     full = f"{q} {a} {t}"
 
     score = 0
-    if query_text and query_text in full:
-        score += 8
+    if query_text:
+        # Полное вхождение запроса — только как отдельное слово/фраза, иначе «привет» матчит «приветственный»
+        qt = query_text.strip()
+        if len(qt) >= 5:
+            if qt in full:
+                score += 8
+        else:
+            # Короткий запрос — только целое слово, не часть другого
+            if re.search(rf"(^|[\s\W]){re.escape(qt)}([\s\W]|$)", full):
+                score += 8
 
     for term in terms:
+        if len(term) < 2:
+            continue
         if term in q:
             score += 3
         elif term in a:
@@ -739,9 +749,10 @@ class StreamlitChatService:
         scored.sort(key=lambda x: x[0], reverse=True)
         if not scored:
             return []
-        if scored[0][0] < 3:
+        # Только если лучший кандидат достаточно релевантен (≥6)
+        if scored[0][0] < 6:
             return []
-        min_score = max(3, scored[0][0] - 2)
+        min_score = max(5, scored[0][0] - 1)
         return [(s, item) for s, item in scored if s >= min_score][:limit]
 
     def _retrieve_candidates(
@@ -839,12 +850,14 @@ class StreamlitChatService:
         history: list[dict],
         profile: dict,
         next_task: dict | None = None,
+        skip_retrieval: bool = False,
     ) -> str:
         """
-        Генеративный режим: GPT сам решает, когда смотреть в базу знаний.
-        Получает историю, профиль, факты из БЗ — и ведёт живой диалог.
+        Генеративный режим: отвечает из базы знаний на вопросы, дружелюбно — на остальное.
         """
         if not self.llm_enabled:
+            if skip_retrieval:
+                return "Чем могу помочь? Спроси что угодно — про процессы, аббревиатуры, каналы."
             candidates = self._retrieve_candidates(user_message, limit=5, history=history)
             if candidates:
                 return self._fallback_answer(candidates)
@@ -853,7 +866,10 @@ class StreamlitChatService:
                 "Или включи OPENROUTER_API_KEY для полноценного диалога."
             )
 
-        candidates = self._retrieve_candidates(user_message, limit=6, history=history)
+        if skip_retrieval:
+            candidates = []
+        else:
+            candidates = self._retrieve_candidates(user_message, limit=6, history=history)
         kb_block = ""
         if candidates:
             facts = [f"• {item.question} → {item.answer}" for item in candidates[:5]]
