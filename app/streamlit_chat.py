@@ -271,6 +271,9 @@ def _score(item: KnowledgeItem, query_text: str, terms: list[str]) -> int:
             score += 2
         elif term in t:
             score += 1
+    # Приоритет ответов модератора — выше в выдаче при равном скоринге
+    if t and "moderator_validated" in t:
+        score += 5
     return score
 
 
@@ -427,13 +430,14 @@ class StreamlitChatService:
             seed_items = []
         patch_items = _load_moderator_patch()
         with self.SessionLocal() as db:
-            existing = {row.question: row for row in db.query(KnowledgeItem).all()}
+            all_rows = list(db.query(KnowledgeItem).all())
+            existing_by_q = {row.question: row for row in all_rows}
             changed = False
             for item in seed_items:
                 q = item.get("question", "")
                 a = item.get("answer", "")
                 t = item.get("tags")
-                row = existing.get(q)
+                row = existing_by_q.get(q) or _find_existing_item_by_normalized_question(db, q)
                 if row is None:
                     db.add(KnowledgeItem(question=q, answer=a, tags=t))
                     changed = True
@@ -445,13 +449,13 @@ class StreamlitChatService:
                 t = it.get("tags")
                 if not q or not a:
                     continue
-                row = existing.get(q) or _find_existing_item_by_normalized_question(db, q)
+                row = existing_by_q.get(q) or _find_existing_item_by_normalized_question(db, q)
                 if row:
                     row.answer = a
                     row.tags = t or row.tags
                 else:
                     db.add(KnowledgeItem(question=q, answer=a, tags=t))
-                    existing[q] = None
+                    existing_by_q[q] = None
                 changed = True
             if changed:
                 db.commit()
@@ -609,6 +613,10 @@ class StreamlitChatService:
 
             # Сначала сохраняем в JSON — гарантия, что не потеряем ответ модератора
             final_tags = (tags or "").strip() or _auto_tags_from_qa(question_text, final_answer, limit=10)
+            if final_tags and "moderator_validated" not in final_tags:
+                final_tags = final_tags + ",moderator_validated"
+            elif not final_tags:
+                final_tags = "moderator_validated"
             _save_to_moderator_patch(question_text, final_answer, final_tags)
 
             row.draft_answer = None
