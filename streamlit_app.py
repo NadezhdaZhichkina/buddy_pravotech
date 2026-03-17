@@ -938,8 +938,6 @@ if st.session_state.chat_username not in st.session_state.messages_by_user:
     st.session_state.messages_by_user[st.session_state.chat_username] = _default_user_messages()
 if st.session_state.chat_username not in st.session_state.profiles_by_user:
     st.session_state.profiles_by_user[st.session_state.chat_username] = _default_user_profile()
-if st.session_state.chat_username not in st.session_state.user_notices_by_user:
-    st.session_state.user_notices_by_user[st.session_state.chat_username] = ""
 if st.session_state.chat_username not in st.session_state.pending_ticket_offer_by_user:
     st.session_state.pending_ticket_offer_by_user[st.session_state.chat_username] = None
 
