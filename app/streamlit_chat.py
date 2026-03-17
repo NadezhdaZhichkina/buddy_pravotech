@@ -41,6 +41,15 @@ class ModerationTicket(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class _PatchItem:
+    """Обёртка для записей из knowledge_moderator.json — совместима с _score()."""
+
+    def __init__(self, question: str, answer: str, tags: str | None = None):
+        self.question = question
+        self.answer = answer
+        self.tags = tags
+
+
 def _extract_seed_items() -> list[dict]:
     """Parse SEED_ITEMS from scripts/seed_knowledge.py without imports."""
     seed_path = Path(__file__).resolve().parent.parent / "scripts" / "seed_knowledge.py"
@@ -161,6 +170,11 @@ def _normalize_question_text(text: str) -> str:
     t = re.sub(r"[^\w\sа-яёa-z0-9]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
+
+
+def _n(t: str) -> str:
+    """Нормализация для дедупликации."""
+    return _normalize_question_text(t)
 
 
 def _looks_like_abbreviation_query(question: str) -> bool:
@@ -529,6 +543,17 @@ class StreamlitChatService:
             db.refresh(row)
         return {"action": "created", "id": int(row.id), "tags": row.tags or ""}
 
+    def save_from_dialogue(self, question: str, answer: str, tags: str | None = "dialogue_learned") -> dict | None:
+        """Самообучение: сохранить успешный Q&A из диалога в базу знаний."""
+        q = (question or "").strip()
+        a = (answer or "").strip()
+        if not q or not a or len(a) < 10:
+            return None
+        try:
+            return self.save_manual_knowledge(question=q, answer=a, tags=tags or "dialogue_learned")
+        except Exception:
+            return None
+
     def list_moderation_tickets(self, include_closed: bool = False) -> list[dict]:
         with self.SessionLocal() as db:
             query = db.query(ModerationTicket).filter(ModerationTicket.requester_username != "system_test")
@@ -689,8 +714,22 @@ class StreamlitChatService:
         query_text = search_text.lower().strip()
         terms = _extract_search_terms(search_text)
         terms = _expand_search_terms(terms, question)  # стемминг, алиасы (мм→mchat)
+        # Берём все записи, приоритет — новейшие (ответы модератора имеют больший id)
         with self.SessionLocal() as db:
-            items = list(db.scalars(select(KnowledgeItem).limit(400)))
+            items = list(
+                db.scalars(select(KnowledgeItem).order_by(KnowledgeItem.id.desc()).limit(600))
+            )
+        # Дополнительно: ответы из knowledge_moderator.json (на случай рассинхрона с БД)
+        patch_items = _load_moderator_patch()
+        seen_questions = {(_n((i.question or "").strip())) for i in items}
+        for it in patch_items:
+            if not isinstance(it, dict):
+                continue
+            q, a = (it.get("question") or "").strip(), (it.get("answer") or "").strip()
+            if not q or not a or _n(q) in seen_questions:
+                continue
+            seen_questions.add(_n(q))
+            items.append(_PatchItem(question=q, answer=a, tags=it.get("tags")))
 
         scored = []
         for item in items:

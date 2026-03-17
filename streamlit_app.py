@@ -10,6 +10,9 @@ import sys
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+cwd = os.getcwd()
+if cwd != _ROOT and os.path.isdir(os.path.join(cwd, "app")) and cwd not in sys.path:
+    sys.path.insert(0, cwd)
 
 import random
 import re
@@ -26,8 +29,15 @@ st.set_page_config(
 )
 
 # Инициализация при первом запуске
-from app.onboarding import ROLE_DISPLAY, extract_role_from_message, get_display_role
-from app.streamlit_chat import StreamlitChatService
+try:
+    from app.onboarding import ROLE_DISPLAY, extract_role_from_message, get_display_role
+    from app.streamlit_chat import StreamlitChatService
+except ModuleNotFoundError:
+    st.error(
+        f"Не найден модуль app. Проверь, что папка `app` есть в репозитории рядом с streamlit_app.py. "
+        f"Директория: {_ROOT}, содержимое: {os.listdir(_ROOT)}"
+    )
+    st.stop()
 
 
 def _get_secret(name: str, default: str = "") -> str:
@@ -338,6 +348,53 @@ def _looks_like_small_talk(text: str) -> bool:
     return any(m in t for m in markers)
 
 
+def _looks_like_complaint(text: str) -> bool:
+    """Жалоба на качество ответа — не искать в базе, отвечать с эмпатией."""
+    t = (text or "").strip().lower()
+    if not t or len(t) > 120:
+        return False
+    markers = (
+        "ерунду", "ерунда", "чушь", "бред", "плохо", "не то", "не то что",
+        "неправда", "неправильно", "не то отвечаешь", "не то пишешь",
+        "не про то", "мимо", "не про то", "совсем не то", "совсем мимо",
+        "не помогает", "не помогло", "бесполезно", "бесполезный",
+    )
+    return any(m in t for m in markers)
+
+
+def _looks_like_pure_greeting(text: str) -> bool:
+    """Только приветствие, без вопроса — не искать в базе («привет» → «приветственный пост»)."""
+    t = (text or "").strip().lower()
+    if not t or len(t) > 25:
+        return False
+    pure_greetings = ("привет", "приветик", "приветствую", "здравствуй", "здравствуйте", "хай", "hello", "hi", "hey", "добрый")
+    return t in pure_greetings or any(t.startswith(g + " ") or t == g for g in pure_greetings)
+
+
+def _looks_like_complaint(text: str) -> bool:
+    """Пользователь жалуется на качество ответов — не искать в базе."""
+    t = (text or "").strip().lower()
+    if not t or len(t) > 150:
+        return False
+    markers = (
+        "ерунду", "ерунда", "бред", "чушь", "не то", "не то что",
+        "плохо отвечаешь", "плохо отвечает", "неправильно", "неправда",
+        "не та информация", "не та инфо", "не про то", "не в тему",
+        "отвечаешь не то", "отвечаешь невпопад", "совсем не то",
+        "ты опять", "опять не то", "опять ерунду",
+    )
+    return any(m in t for m in markers)
+
+
+def _looks_like_pure_greeting(text: str) -> bool:
+    """Только приветствие без вопроса — не искать в базе (привет→приветственный и т.д.)."""
+    t = (text or "").strip().lower()
+    if not t or len(t) > 25:
+        return False
+    pure = {"привет", "приветик", "здравствуй", "здравствуйте", "хай", "hello", "hi", "добрый день", "добрый вечер", "доброе утро"}
+    return t in pure or any(t == g or t.startswith(g + " ") or t.startswith(g + ",") for g in pure)
+
+
 def _needs_moderator_escalation(text: str) -> bool:
     t = (text or "").lower()
     return (
@@ -408,6 +465,18 @@ def _is_no_reply(text: str) -> bool:
     t = (text or "").strip().lower()
     no_variants = {"нет", "no", "неа", "стоп", "отмена", "не надо"}
     return t in no_variants or t.startswith("нет ")
+
+
+def _is_positive_feedback(text: str) -> bool:
+    """Сообщение похоже на благодарность/подтверждение — можно сохранить ответ в базу (self-learning)."""
+    t = (text or "").strip().lower()
+    if len(t) > 50:
+        return False
+    variants = {
+        "спасибо", "благодарю", "понятно", "ясно", "отлично", "супер", "круто",
+        "помогло", "принял", "приняла", "ок", "хорошо", "ясно", "thanks", "thx",
+    }
+    return t in variants or t.startswith("спасибо ") or t.startswith("понятно ")
 
 
 def _is_direct_moderator_request(text: str) -> bool:
@@ -536,9 +605,10 @@ def _should_send_to_moderator(prompt: str, result: dict) -> bool:
     return source in ("fallback", "abbreviation_guard")
 
 
-def _update_progress(text: str, progress: dict[str, bool]) -> list[str]:
+def _update_progress(text: str, progress: dict[str, bool], last_assistant_content: str | None = None) -> list[str]:
     t = (text or "").lower()
     changed = []
+    last_low = (last_assistant_content or "").lower()
 
     if _has_done_signal(t):
         if any(w in t for w in ("почта", "email", "mail", "авториз")) and not progress.get("auth_email"):
@@ -553,7 +623,15 @@ def _update_progress(text: str, progress: dict[str, bool]) -> list[str]:
         if any(w in t for w in ("видео", "продукт")) and not progress.get("product_video"):
             progress["product_video"] = True
             changed.append("видео по продуктам изучено")
-        if any(w in t for w in ("пост", "talk", "приветствен")) and not progress.get("intro_post"):
+        # Пост: явно в тексте или в контексте (последнее сообщение было про пост, пользователь "написала/сделала")
+        intro_post_trigger = (
+            any(w in t for w in ("пост", "talk", "приветствен"))
+            or (
+                any(w in t for w in ("написала", "сделала", "отправила"))
+                and any(w in last_low for w in ("пост", "talk", "приветствен"))
+            )
+        )
+        if intro_post_trigger and not progress.get("intro_post"):
             progress["intro_post"] = True
             changed.append("приветственный пост отправлен")
         if any(w in t for w in ("бенефит", "кэдо", "культур")) and not progress.get("benefits_culture"):
@@ -645,13 +723,19 @@ def _small_talk_reply(next_task: dict | None) -> str:
     )
 
 
-def _apply_informative_user_message(profile: dict, prompt: str) -> dict:
+def _apply_informative_user_message(profile: dict, prompt: str, history: list[dict] | None = None) -> dict:
     """Обновляет профиль по информативным сообщениям (не Q&A)."""
     text = (prompt or "").strip()
     role = _extract_known_role(text)
     circle = _extract_circle(text)
     leader = _extract_leader(text)
-    changes = _update_progress(text, profile["progress"])
+    last_assistant = None
+    if history:
+        for m in reversed(history):
+            if m.get("role") == "assistant":
+                last_assistant = (m.get("content") or "").strip()
+                break
+    changes = _update_progress(text, profile["progress"], last_assistant_content=last_assistant)
 
     updated_fields = []
     if role and role != profile.get("role"):
@@ -1148,6 +1232,19 @@ if (not is_moderator) and (prompt := st.chat_input("Напиши сообщен�
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Self-learning: при «спасибо»/«понятно» сохраняем последний Q&A в базу знаний
+    msgs = st.session_state.messages
+    if (
+        _is_positive_feedback(prompt)
+        and len(msgs) >= 3
+        and msgs[-2].get("role") == "assistant"
+        and msgs[-3].get("role") == "user"
+    ):
+        last_q = (msgs[-3].get("content") or "").strip()
+        last_a = (msgs[-2].get("content") or "").strip()
+        if last_q and len(last_a) > 20 and "тикет" not in last_a.lower() and "модератору" not in last_a.lower():
+            service.save_from_dialogue(last_q, last_a)
+
     with st.chat_message("assistant"):
         with st.spinner("Думаю…"):
             try:
@@ -1226,30 +1323,42 @@ if (not is_moderator) and (prompt := st.chat_input("Напиши сообщен�
                         handled_ticket_offer = True
 
                 if not handled_ticket_offer:
-                    _apply_informative_user_message(profile, prompt)
-                    if profile.get("role") and profile.get("circle"):
-                        profile["started"] = True
-                    if _extract_leader(prompt):
-                        profile["leader"] = _extract_leader(prompt)
-                    _update_progress(prompt, profile["progress"])
-                    next_task = _next_task(profile["progress"])
                     history = [
                         {"role": m["role"], "content": m["content"]}
                         for m in st.session_state.messages[-10:]
                     ]
-                    # При выключенном LLM и приветствии/малом разговоре — короткий ответ, не поиск по базе.
-                    if not service.llm_enabled and _looks_like_small_talk(prompt):
+                    info = _apply_informative_user_message(profile, prompt, history)
+                    if profile.get("role") and profile.get("circle"):
+                        profile["started"] = True
+                    if _extract_leader(prompt):
+                        profile["leader"] = _extract_leader(prompt)
+                    next_task = _next_task(profile["progress"])
+
+                    if _looks_like_complaint(prompt):
+                        response = (
+                            "Ой, извини! Похоже, я ответила не то. "
+                            "Напиши, пожалуйста, что именно ты спрашивала или что хотела узнать — "
+                            "попробую помочь точнее. Или передам вопрос человеку."
+                        )
+                    elif _looks_like_pure_greeting(prompt):
+                        response = (
+                            "Привет! 👋 Чем могу помочь? Можешь спросить про процессы, аббревиатуры или каналы. "
+                            "Если напишешь роль и круг — подскажу точнее."
+                        )
+                    elif info["informative"]:
+                        response = _build_informative_ack(profile, info, keep_pending_offer=False)
+                    elif not service.llm_enabled and _looks_like_small_talk(prompt):
                         response = (
                             "Привет! Чем могу помочь? Можешь спросить про процессы, аббревиатуры или каналы — "
                             "поищу в базе знаний. Если напишешь роль и круг, подскажу точнее."
                         )
                     else:
                         response = service.generate_reply(
-                        prompt,
-                        history=history,
-                        profile=profile,
-                        next_task=next_task,
-                    )
+                            prompt,
+                            history=history,
+                            profile=profile,
+                            next_task=next_task,
+                        )
                     # Заменять на тикет, если GPT явно предлагает передать модератору — всегда.
                     # Иначе — только когда нет релевантного ответа в базе (GPT мог добавить «уточнить» как оговорку).
                     has_kb_answer = service.has_strong_kb_match(prompt, history=history)
