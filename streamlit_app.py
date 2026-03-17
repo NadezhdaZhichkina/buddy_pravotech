@@ -452,15 +452,22 @@ def _is_no_reply(text: str) -> bool:
 
 
 def _is_positive_feedback(text: str) -> bool:
-    """Сообщение похоже на благодарность/подтверждение — можно сохранить ответ в базу (self-learning)."""
+    """Сообщение похоже на благодарность/подтверждение — сохраняем Q&A в базу (self-learning)."""
     t = (text or "").strip().lower()
-    if len(t) > 50:
+    if len(t) > 60:
         return False
     variants = {
         "спасибо", "благодарю", "понятно", "ясно", "отлично", "супер", "круто",
-        "помогло", "принял", "приняла", "ок", "хорошо", "ясно", "thanks", "thx",
+        "помогло", "принял", "приняла", "ок", "хорошо", "thanks", "thx",
+        "класс", "здорово", "пригодилось", "принято", "ясненько", "ага", "угу",
     }
-    return t in variants or t.startswith("спасибо ") or t.startswith("понятно ")
+    if t in variants:
+        return True
+    if any(t.startswith(v + " ") or t.startswith(v + ",") for v in ("спасибо", "понятно", "отлично", "супер")):
+        return True
+    if "спасибо" in t or "помогло" in t or "понятно" in t:
+        return True
+    return False
 
 
 def _is_direct_moderator_request(text: str) -> bool:
@@ -783,9 +790,8 @@ def _default_user_messages() -> list[dict[str, str]]:
         {
             "role": "assistant",
             "content": (
-                "Привет! Я Buddy 👋 Просто друг — подскажу по чатам, процессам, знакомствам. "
-                "Напиши **роль** и **круг** — буду точнее помогать.\n"
-                "Например: «Я менеджер, круг Work»."
+                "Привет! 👋 Я Buddy — твой друг здесь. Подскажу по чатам, процессам, знакомствам. "
+                "Напиши роль и круг — буду точнее. Например: «менеджер, круг Work»."
             ),
         }
     ]
