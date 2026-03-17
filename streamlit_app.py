@@ -548,13 +548,9 @@ def _update_progress(text: str, progress: dict[str, bool], last_assistant_conten
 
     if _has_done_signal(t):
         # Почта: явно в тексте или в контексте (последнее сообщение было про почту/авторизацию)
-        auth_trigger = (
-            any(w in t for w in ("почта", "почту", "почте", "email", "mail", "авториз", "вошла", "зашла", "залогинилась"))
-            or (
-                any(w in t for w in ("уже", "готово", "готова", "сделала", "сделал", "отправила"))
-                and any(w in last_low for w in ("почт", "email", "mail", "авториз", "корпоративн"))
-            )
-        )
+        auth_in_text = any(w in t for w in ("почта", "почту", "почте", "email", "mail", "авториз", "вошла", "зашла", "залогинилась"))
+        auth_in_context = any(w in t for w in ("уже", "готово", "готова", "сделала", "сделал", "отправила")) and any(w in last_low for w in ("почт", "email", "mail", "авториз", "корпоративн"))
+        auth_trigger = auth_in_text or auth_in_context
         if auth_trigger and not progress.get("auth_email"):
             progress["auth_email"] = True
             changed.append("почта настроена")
