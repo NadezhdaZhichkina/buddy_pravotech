@@ -408,6 +408,7 @@ class StreamlitChatService:
                 engine_kw["poolclass"] = StaticPool
         else:
             engine_kw["pool_pre_ping"] = True
+            engine_kw["connect_args"] = {"connect_timeout": 10}
         self.engine = create_engine(db_url, **engine_kw)
         Base.metadata.create_all(bind=self.engine)
         self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, future=True)

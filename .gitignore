@@ -12,6 +12,9 @@ test_buddy.db
 .env
 .env.local
 
+# Streamlit secrets (не коммитить)
+.streamlit/secrets.toml
+
 # Release copies (локальные копии v1.0 и buddy-2.0)
 releases/
 
